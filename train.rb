@@ -1,3 +1,5 @@
+#!/usr/bin/ruby
+
 require "json"
 
 PathData = "data.csv"
@@ -12,6 +14,8 @@ def get_data_from_csv(csv_path)
   raw_schema, *raw_lines = IO.readlines(csv_path).map(&:chomp)
   # 1行目は schema であると仮定して捨てる
   # 2行目以降は, 数値データ2列からなるCSVであるかをチェックする.
+  fail "no data line" if !raw_lines
+  fail "no enough data lines" if raw_lines.size < 2
   raw_lines
     .map{ |s| s.split(",") }
     .map{ |ss|
@@ -19,6 +23,9 @@ def get_data_from_csv(csv_path)
       km, price = ss.map{ |s| Float(s) }
       { x: km, y: price }
     }
+  rescue => e
+    p e
+    exit 1
 end
 
 # ボストンデータセット("./boston.txt"にあると仮定)から x = 部屋の広さ, y = 価格 と仮定してデータを取得する
