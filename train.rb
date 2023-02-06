@@ -16,16 +16,17 @@ def get_data_from_csv(csv_path)
   # 2行目以降は, 数値データ2列からなるCSVであるかをチェックする.
   fail "no data line" if !raw_lines
   fail "no enough data lines" if raw_lines.size < 2
-  raw_lines
+  return raw_lines
     .map{ |s| s.split(",") }
     .map{ |ss|
       fail "row size is not 2" if ss.size != 2
       km, price = ss.map{ |s| Float(s) }
       { x: km, y: price }
     }
-  rescue => e
-    p e
-    exit 1
+
+rescue => e
+  p e
+  exit 1
 end
 
 # ボストンデータセット("./boston.txt"にあると仮定)から x = 部屋の広さ, y = 価格 と仮定してデータを取得する
@@ -129,15 +130,15 @@ def train(data, with_standardize = false)
   l = 10
   params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l }
   rate = LearningRate
-  if nx && ny then
-    # 標準化を解除
-    up = unstandardize_params(params, nx, ny)
-    a = up[:t0]
-    b = up[:t1]
-  end
   Iterations.times { |i|
     a = params[:t0]
     b = params[:t1]
+    if nx && ny then
+      # 標準化を解除
+      up = unstandardize_params(params, nx, ny)
+      a = up[:t0]
+      b = up[:t1]
+    end
     fail "a is not finite" if !a.finite?
     fail "b is not finite" if !b.finite?
     $stderr.puts "f_#{i}(x) = #{a} + #{b} * x"
@@ -175,9 +176,9 @@ def train(data, with_standardize = false)
     return params
   end
 
-  rescue => e
-    p e
-    exit 1
+rescue => e
+  p e
+  exit 1
 end
 
 # 検算用: 解析解など
@@ -228,9 +229,9 @@ def write_params(params, path)
   File.open(path, "w") { |f|
     f.write(JSON.unparse(params))
   }
-  rescue => e
-    p e
-    exit 1
+rescue => e
+  p e
+  exit 1
 end
 
 def main
