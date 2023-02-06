@@ -1,4 +1,7 @@
+require "json"
+
 PathData = "data.csv"
+PathParameters = "params.json"
 LearningRate = 0.5
 Iterations = 100000
 Epsilon = 1e-10
@@ -83,6 +86,19 @@ def train_a_step(data, params)
   }
 end
 
+def standardize_data(data)
+  nx = standardizer(data.map{ |d| d[:x] })
+  ny = standardizer(data.map{ |d| d[:y] })
+  data = (0...nx[:ns].size).map{ |i| { x: nx[:ns][i], y: ny[:ns][i] } }
+  [nx, ny, data]
+end
+
+def unstandardize_params(params, nx, ny)
+  a = params[:t0]
+  b = params[:t1]
+  a, b = [(a + b * nx[:a] * nx[:b] - ny[:a] * ny[:b]) / ny[:a], b * nx[:a] / ny[:a]]
+  return { t0: a, t1: b }
+end
 
 # データセット data を使って学習を実施する.
 # data = { x: number[], y: number[] }
@@ -98,9 +114,7 @@ def train(data, with_standardize = false)
   ny = nil
   if with_standardize then
     # data を標準化する
-    nx = standardizer(data.map{ |d| d[:x] })
-    ny = standardizer(data.map{ |d| d[:y] })
-    data = (0...nx[:ns].size).map{ |i| { x: nx[:ns][i], y: ny[:ns][i] } }
+    nx, ny, data = standardize_data(data)
   end
 
   # パラメータ t0, t1: それぞれ初期値を [-l,+l] からランダムにとる.
@@ -112,7 +126,9 @@ def train(data, with_standardize = false)
     b = params[:t1]
     if nx && ny then
       # 標準化を解除
-      a, b = [(a + b * nx[:a] * nx[:b] - ny[:a] * ny[:b]) / ny[:a], b * nx[:a] / ny[:a]]
+      up = unstandardize_params(params, nx, ny)
+      a = up[:t0]
+      b = up[:t1]
     end
     $stderr.puts "f_#{i}(x) = #{a} + #{b} * x"
 
@@ -139,6 +155,11 @@ def train(data, with_standardize = false)
     params[:t0] += rate * delta[:d0]
     params[:t1] += rate * delta[:d1]
   }
+  if nx && ny then
+    unstandardize_params(params, nx, ny)
+  else
+    params
+  end
 end
 
 # 検算用: 解析解など
@@ -185,6 +206,13 @@ def f(data)
   [err, err_a, err_b]
 end
 
+def write_params(params, path)
+  File.open(path, "w") { |f|
+    f.write(JSON.unparse(params))
+  }
+end
+
 # ds = get_data_from_boston
 ds = get_data_from_csv(PathData)
-train(ds, true)
+params = train(ds, true)
+write_params(params, PathParameters)
