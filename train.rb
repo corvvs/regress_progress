@@ -47,6 +47,29 @@ def get_data_from_boston
     }
 end
 
+# 精度パラメータを計算する
+def get_precision(data, params)
+  t0 = params[:t0]
+  t1 = params[:t1]
+  # R2
+  obs_mean = data.map{ |d| d[:y] }.reduce(0, :+) / data.size
+  pe2 = data.map{ |d| (d[:y] - hypothesis(t0, t1, d[:x])) ** 2 }.reduce(0, :+)
+  oe2 = data.map{ |d| (d[:y] - obs_mean) ** 2 }.reduce(0, :+)
+  r2 = 1 - pe2 / oe2
+  p "R2: #{r2}"
+
+  # RMSE
+  rmse = Math.sqrt(pe2 / data.size)
+  p "RMSE: #{rmse}"
+
+  # MAE
+  pe1 = data.map{ |d| (d[:y] - hypothesis(t0, t1, d[:x])).abs }.reduce(0, :+)
+  mae = pe1 / data.size
+  p "MAE: #{mae}"
+
+  { R2: r2, RMSE: rmse, MAE: mae }
+end
+
 # 数値列 xs を平均 = 0, 分散 = 1になるように標準化するパラメータ a, b と, 標準化後の数値列 ns を返す.
 # ns[i] = a * (xs[i] + b).
 def standardizer(xs)
@@ -60,6 +83,21 @@ def standardizer(xs)
   a = 1 / Math.sqrt(syy)
   ns = xs.map{ |x| a * (x + b) }
   { a: a, b: b, ns: ns }
+end
+
+
+def standardize_data(data)
+  nx = standardizer(data.map{ |d| d[:x] })
+  ny = standardizer(data.map{ |d| d[:y] })
+  data = (0...nx[:ns].size).map{ |i| { x: nx[:ns][i], y: ny[:ns][i] } }
+  [nx, ny, data]
+end
+
+def unstandardize_params(params, nx, ny)
+  a = params[:t0]
+  b = params[:t1]
+  a, b = [(a + b * nx[:a] * nx[:b] - ny[:a] * ny[:b]) / ny[:a], b * nx[:a] / ny[:a]]
+  return { **params, t0: a, t1: b }
 end
 
 def hypothesis(t0, t1, x)
@@ -97,20 +135,6 @@ def train_a_step(data, params)
   }
 end
 
-def standardize_data(data)
-  nx = standardizer(data.map{ |d| d[:x] })
-  ny = standardizer(data.map{ |d| d[:y] })
-  data = (0...nx[:ns].size).map{ |i| { x: nx[:ns][i], y: ny[:ns][i] } }
-  [nx, ny, data]
-end
-
-def unstandardize_params(params, nx, ny)
-  a = params[:t0]
-  b = params[:t1]
-  a, b = [(a + b * nx[:a] * nx[:b] - ny[:a] * ny[:b]) / ny[:a], b * nx[:a] / ny[:a]]
-  return { t0: a, t1: b }
-end
-
 # データセット data を使って学習を実施する.
 # data = { x: number[], y: number[] }
 # 仮説として y = t0 + t1 * x を用いる(x = km, y = price).
@@ -130,7 +154,7 @@ def train(data, with_standardize = false)
 
   # パラメータ t0, t1: それぞれ初期値を [-l,+l] からランダムにとる.
   l = 10
-  params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l, error2: Float::INFINITY }
+  params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l, error2: Float::INFINITY, iterations: 0 }
   rate = LearningRate
   Iterations.times { |i|
     a = params[:t0]
@@ -172,6 +196,7 @@ def train(data, with_standardize = false)
     params[:t0] += rate * delta[:d0]
     params[:t1] += rate * delta[:d1]
     params[:error2] = delta[:error2]
+    params[:iterations] += 1
   }
   if nx && ny then
     return unstandardize_params(params, nx, ny)
@@ -185,7 +210,7 @@ def trains(data, with_standardize = false)
   Trials.times { |i|
     begin
       params = train(data, with_standardize)
-      puts "#{i + 1}-th trial t0: #{params[:t0]} t1: #{params[:t1]}"
+      puts "#{i + 1}-th trial t0: #{params[:t0]} t1: #{params[:t1]} err2: #{params[:error2]} iters: #{params[:iterations]}"
       results << params
     rescue => e
       next
@@ -197,6 +222,7 @@ def trains(data, with_standardize = false)
   total = picked.reduce({ t0: 0, t1: 0 }){ |s, p| { t0: s[:t0] + p[:t0], t1: s[:t1] + p[:t1] } }
   mean = { t0: total[:t0] / picked.size, t1: total[:t1] / picked.size }
   puts "mean t0: #{mean[:t0]} t1: #{mean[:t1]}"
+  get_precision(data, mean)
   return mean
 end
 
