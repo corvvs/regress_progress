@@ -78,6 +78,7 @@ end
 #   d1: s1 の変化分
 # }
 def train_a_step(data, params)
+  # assumed m > 0
   m = data.size
   t0 = params[:t0]
   t1 = params[:t1]
@@ -128,23 +129,29 @@ def train(data, with_standardize = false)
   l = 10
   params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l }
   rate = LearningRate
+  if nx && ny then
+    # 標準化を解除
+    up = unstandardize_params(params, nx, ny)
+    a = up[:t0]
+    b = up[:t1]
+  end
   Iterations.times { |i|
     a = params[:t0]
     b = params[:t1]
-    if nx && ny then
-      # 標準化を解除
-      up = unstandardize_params(params, nx, ny)
-      a = up[:t0]
-      b = up[:t1]
-    end
+    fail "a is not finite" if !a.finite?
+    fail "b is not finite" if !b.finite?
     $stderr.puts "f_#{i}(x) = #{a} + #{b} * x"
 
     delta = train_a_step(data, params)
     # 偏微分の大きさ
     ms = Math.sqrt(delta[:s0] ** 2 + delta[:s1] ** 2)
+    fail "ms is not finite" if !ms.finite?
 
     while (true) do
-      dp = { t0: params[:t0] + rate * delta[:d0], t1: params[:t1] + rate * delta[:d1] }
+      dp = {
+        t0: params[:t0] + rate * delta[:d0],
+        t1: params[:t1] + rate * delta[:d1],
+      }
       e2 = delta[:error2]
       d2 = train_a_step(data, dp)
       e2d = d2[:error2]
@@ -163,10 +170,14 @@ def train(data, with_standardize = false)
     params[:t1] += rate * delta[:d1]
   }
   if nx && ny then
-    unstandardize_params(params, nx, ny)
+    return unstandardize_params(params, nx, ny)
   else
-    params
+    return params
   end
+
+  rescue => e
+    p e
+    exit 1
 end
 
 # 検算用: 解析解など
@@ -217,9 +228,16 @@ def write_params(params, path)
   File.open(path, "w") { |f|
     f.write(JSON.unparse(params))
   }
+  rescue => e
+    p e
+    exit 1
 end
 
-# ds = get_data_from_boston
-ds = get_data_from_csv(PathData)
-params = train(ds, true)
-write_params(params, PathParameters)
+def main
+  # ds = get_data_from_boston
+  ds = get_data_from_csv(PathData)
+  params = train(ds, true)
+  write_params(params, PathParameters)
+end
+
+main()
