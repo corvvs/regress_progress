@@ -5,6 +5,8 @@ require "json"
 PathData = "data.csv"
 PathParameters = "params.json"
 LearningRate = 0.5
+Trials = 16
+Picks = 8
 Iterations = 100000
 Epsilon = 1e-10
 Xi = 0.8
@@ -117,7 +119,7 @@ end
 def train(data, with_standardize = false)
   fail "no data" if data.size == 0
 
-  f(data)
+  # f(data)
 
   nx = nil
   ny = nil
@@ -128,7 +130,7 @@ def train(data, with_standardize = false)
 
   # パラメータ t0, t1: それぞれ初期値を [-l,+l] からランダムにとる.
   l = 10
-  params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l }
+  params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l, error2: Float::INFINITY }
   rate = LearningRate
   Iterations.times { |i|
     a = params[:t0]
@@ -141,7 +143,7 @@ def train(data, with_standardize = false)
     end
     fail "a is not finite" if !a.finite?
     fail "b is not finite" if !b.finite?
-    $stderr.puts "f_#{i}(x) = #{a} + #{b} * x"
+    # $stderr.puts "f_#{i}(x) = #{a} + #{b} * x"
 
     delta = train_a_step(data, params)
     # 偏微分の大きさ
@@ -164,21 +166,38 @@ def train(data, with_standardize = false)
 
     break if ms < Epsilon # イテレーション終了
 
-    $stderr.puts "  ms = #{ms}"
-    $stderr.puts "  rate = #{rate}"
-    $stderr.puts "  error_#{i} = #{delta[:error2]}"
+    # $stderr.puts "  ms = #{ms}"
+    # $stderr.puts "  rate = #{rate}"
+    # $stderr.puts "  error_#{i} = #{delta[:error2]}"
     params[:t0] += rate * delta[:d0]
     params[:t1] += rate * delta[:d1]
+    params[:error2] = delta[:error2]
   }
   if nx && ny then
     return unstandardize_params(params, nx, ny)
   else
     return params
   end
+end
 
-rescue => e
-  p e
-  exit 1
+def trains(data, with_standardize = false)
+  results = []
+  Trials.times { |i|
+    begin
+      params = train(data, with_standardize)
+      puts "#{i + 1}-th trial t0: #{params[:t0]} t1: #{params[:t1]}"
+      results << params
+    rescue => e
+      next
+    end
+  }
+  fail "no valid results" if results.size < 1
+  results.sort_by!{ |p| p[:error2] }
+  picked = results[0...Picks]
+  total = picked.reduce({ t0: 0, t1: 0 }){ |s, p| { t0: s[:t0] + p[:t0], t1: s[:t1] + p[:t1] } }
+  mean = { t0: total[:t0] / picked.size, t1: total[:t1] / picked.size }
+  puts "mean t0: #{mean[:t0]} t1: #{mean[:t1]}"
+  return mean
 end
 
 # 検算用: 解析解など
@@ -237,7 +256,7 @@ end
 def main
   # ds = get_data_from_boston
   ds = get_data_from_csv(PathData)
-  params = train(ds, true)
+  params = trains(ds, true)
   write_params(params, PathParameters)
 end
 
