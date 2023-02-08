@@ -378,6 +378,8 @@ def main
 rescue => e
   $stderr.puts e.message
   exit 1
+rescue => e
+  exit 1
 end
 
 main()
