@@ -90,6 +90,8 @@ def unstandardize_params(params, nx, ny)
   a = params[:t0]
   b = params[:t1]
   a, b = [(a + b * nx[:a] * nx[:b] - ny[:a] * ny[:b]) / ny[:a], b * nx[:a] / ny[:a]]
+  fail "a is not finite" if !a.finite?
+  fail "b is not finite" if !b.finite?
   return { **params, t0: a, t1: b }
 end
 
@@ -102,8 +104,7 @@ end
 #   error2: 誤差の自乗和
 #   s0: error2 の t0 偏微分
 #   s1: error2 の t1 偏微分
-#   d0: s0 の変化分 (偏微分の符号を反転して学習率で適当にダウンスケールする)
-#   d1: s1 の変化分
+#   d0, d1: s0, s1 をもとにした移動方向ベクトル
 # }
 def train_a_step(data, params)
   # assumed m > 0
@@ -140,17 +141,6 @@ def train(settings, data)
   params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l, error2: Float::INFINITY, iterations: 0 }
   rate = settings[:initial_learning_rate]
   settings[:max_iterations].times { |i|
-    a = params[:t0]
-    b = params[:t1]
-    if nx && ny then
-      # 標準化を解除
-      up = unstandardize_params(params, nx, ny)
-      a = up[:t0]
-      b = up[:t1]
-    end
-    fail "a is not finite" if !a.finite?
-    fail "b is not finite" if !b.finite?
-    # $stderr.puts "f_#{i}(x) = #{a} + #{b} * x"
 
     delta = train_a_step(data, params)
     # 偏微分の大きさ
@@ -185,13 +175,6 @@ def train(settings, data)
   end
 end
 
-def synth_results(results, data)
-  n = results.size
-  synthed_params = results.reduce({ t0: 0, t1: 0 }){ |s, p| s[:t0] += p[:t0] / n; s[:t1] += p[:t1] / n; s }
-  synthed_precision = get_precision(data, synthed_params)
-  { **synthed_params, **synthed_precision }
-end
-
 # 学習セッティングに従い, dataを使って学習を行う
 def trains(settings, data)
   results = []
@@ -220,8 +203,6 @@ def trains(settings, data)
   picked = results.min_by{ |p| p[:error2] }
   puts sprintf("picked: iteration #%d\nt0: %f t1: %f", picked[:nth], picked[:t0], picked[:t1])
   puts stringify_precision(picked)
-  # picked = synth_results(results, data)
-  # puts sprintf("picked:\nt0: %f t1: %f\nerr2: %f\nR2: %f", picked[:t0], picked[:t1], picked[:error2], picked[:R2])
   return picked
 end
 
