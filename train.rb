@@ -39,20 +39,21 @@ end
 def get_precision(data, params)
   t0 = params[:t0]
   t1 = params[:t1]
-  # error2
-  pe2 = data.map{ |d| (d[:y] - hypothesis(t0, t1, d[:x])) ** 2 }.reduce(0, :+)
-  error2 = pe2
+  # error2: 誤差の自乗平均
+  diffs = data.map{ |d| d[:y] - hypothesis(t0, t1, d[:x]) }
+  pe2 = diffs.map{ |d| d ** 2 }.reduce(0, :+)
+  error2 = pe2 / data.size
 
-  # R2
+  # R2: 決定係数
   obs_mean = data.map{ |d| d[:y] }.reduce(0, :+) / data.size
   oe2 = data.map{ |d| (d[:y] - obs_mean) ** 2 }.reduce(0, :+)
   r2 = 1 - pe2 / oe2
 
-  # RMSE
+  # RMSE: 誤差の自乗和平均の平方根 (= error2のルート)
   rmse = Math.sqrt(pe2 / data.size)
 
-  # MAE
-  pe1 = data.map{ |d| (d[:y] - hypothesis(t0, t1, d[:x])).abs }.reduce(0, :+)
+  # MAE: 誤差の絶対値の平均
+  pe1 = diffs.map{ |d| d.abs }.reduce(0, :+)
   mae = pe1 / data.size
 
   { error2: error2, R2: r2, RMSE: rmse, MAE: mae }
@@ -96,7 +97,7 @@ def unstandardize_params(params, nx, ny)
 end
 
 def hypothesis(t0, t1, x)
-  t0 + t1 * x
+  return t0 + t1 * x
 end
 
 # パラメータを1段階変化させる
@@ -111,9 +112,10 @@ def train_a_step(data, params)
   m = data.size
   t0 = params[:t0]
   t1 = params[:t1]
-  error2 = data.map{ |d| (hypothesis(t0, t1, d[:x]) - d[:y]) ** 2    }.reduce(0, :+)
-  s0     = data.map{ |d| (hypothesis(t0, t1, d[:x]) - d[:y])         }.reduce(0, :+)
-  s1     = data.map{ |d| (hypothesis(t0, t1, d[:x]) - d[:y]) * d[:x] }.reduce(0, :+)
+  diffs = data.map{ |d| hypothesis(t0, t1, d[:x]) - d[:y] }
+  error2 = (0...diffs.size).map{ |i| diffs[i] ** 2          }.reduce(0, :+)
+  s0     = (0...diffs.size).map{ |i| diffs[i]               }.reduce(0, :+)
+  s1     = (0...diffs.size).map{ |i| diffs[i] * data[i][:x] }.reduce(0, :+)
   return {
     error2: error2,
     s0: s0,
@@ -141,7 +143,6 @@ def train(settings, data)
   params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l, error2: Float::INFINITY, iterations: 0 }
   rate = settings[:initial_learning_rate]
   settings[:max_iterations].times { |i|
-
     delta = train_a_step(data, params)
     # 偏微分の大きさ
     ms = Math.sqrt(delta[:s0] ** 2 + delta[:s1] ** 2)
@@ -159,7 +160,7 @@ def train(settings, data)
       
       # Armijo条件
       break if e2d <= e2 + settings[:xi] * rate * ms
-      rate *= 0.99
+      rate *= 0.98
     end
 
     params[:t0] += rate * delta[:d0]
