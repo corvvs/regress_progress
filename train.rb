@@ -1,15 +1,7 @@
 #!/usr/bin/ruby
 
+require 'optparse'
 require "json"
-
-PathData = "data.csv"
-PathParameters = "params.json"
-LearningRate = 0.5
-Trials = 16
-Picks = 8
-Iterations = 100000
-Epsilon = 1e-10
-Xi = 0.8
 
 # 指定されたパスにあるCSVファイルからデータを取得する
 def get_data_from_csv(csv_path)
@@ -25,10 +17,6 @@ def get_data_from_csv(csv_path)
       km, price = ss.map{ |s| Float(s) }
       { x: km, y: price }
     }
-
-rescue => e
-  p e
-  exit 1
 end
 
 # ボストンデータセット("./boston.txt"にあると仮定)から x = 部屋の広さ, y = 価格 と仮定してデータを取得する
@@ -51,28 +39,32 @@ end
 def get_precision(data, params)
   t0 = params[:t0]
   t1 = params[:t1]
+  # error2
+  pe2 = data.map{ |d| (d[:y] - hypothesis(t0, t1, d[:x])) ** 2 }.reduce(0, :+)
+  error2 = pe2
+
   # R2
   obs_mean = data.map{ |d| d[:y] }.reduce(0, :+) / data.size
-  pe2 = data.map{ |d| (d[:y] - hypothesis(t0, t1, d[:x])) ** 2 }.reduce(0, :+)
   oe2 = data.map{ |d| (d[:y] - obs_mean) ** 2 }.reduce(0, :+)
   r2 = 1 - pe2 / oe2
-  p "R2: #{r2}"
 
   # RMSE
   rmse = Math.sqrt(pe2 / data.size)
-  p "RMSE: #{rmse}"
 
   # MAE
   pe1 = data.map{ |d| (d[:y] - hypothesis(t0, t1, d[:x])).abs }.reduce(0, :+)
   mae = pe1 / data.size
-  p "MAE: #{mae}"
 
-  { R2: r2, RMSE: rmse, MAE: mae }
+  { error2: error2, R2: r2, RMSE: rmse, MAE: mae }
+end
+
+def stringify_precision(precision)
+  sprintf("  Error2: %f\n  R2: %f\n  RMSE: %f\n  MAE: %f", precision[:error2], precision[:R2], precision[:RMSE], precision[:MAE])
 end
 
 # 数値列 xs を平均 = 0, 分散 = 1になるように標準化するパラメータ a, b と, 標準化後の数値列 ns を返す.
 # ns[i] = a * (xs[i] + b).
-def standardizer(xs)
+def standardize(xs)
   n = xs.size
   sx = xs.reduce(0) { |s,x| s + x }
   # Σ(x + b) = 0 となるように b を決定
@@ -85,14 +77,15 @@ def standardizer(xs)
   { a: a, b: b, ns: ns }
 end
 
-
+# 「データを」標準化する
 def standardize_data(data)
-  nx = standardizer(data.map{ |d| d[:x] })
-  ny = standardizer(data.map{ |d| d[:y] })
+  nx = standardize(data.map{ |d| d[:x] })
+  ny = standardize(data.map{ |d| d[:y] })
   data = (0...nx[:ns].size).map{ |i| { x: nx[:ns][i], y: ny[:ns][i] } }
   [nx, ny, data]
 end
 
+# 「パラメータの」標準化を解除する
 def unstandardize_params(params, nx, ny)
   a = params[:t0]
   b = params[:t1]
@@ -102,12 +95,6 @@ end
 
 def hypothesis(t0, t1, x)
   t0 + t1 * x
-end
-
-def error2(data, params)
-  t0 = params[:t0]
-  t1 = params[:t1]
-  data.map{ |d| (hypothesis(t0, t1, d[:x]) - d[:y]) ** 2    }.reduce(0, :+)
 end
 
 # パラメータを1段階変化させる
@@ -123,7 +110,7 @@ def train_a_step(data, params)
   m = data.size
   t0 = params[:t0]
   t1 = params[:t1]
-  error2 = error2(data, params)
+  error2 = data.map{ |d| (hypothesis(t0, t1, d[:x]) - d[:y]) ** 2    }.reduce(0, :+)
   s0     = data.map{ |d| (hypothesis(t0, t1, d[:x]) - d[:y])         }.reduce(0, :+)
   s1     = data.map{ |d| (hypothesis(t0, t1, d[:x]) - d[:y]) * d[:x] }.reduce(0, :+)
   return {
@@ -138,16 +125,12 @@ end
 # データセット data を使って学習を実施する.
 # data = { x: number[], y: number[] }
 # 仮説として y = t0 + t1 * x を用いる(x = km, y = price).
-# with_standardize == true の場合, データの標準化を行う.
-# 標準化: x, y それぞれについて, 平均 = 0, 分散 = 1 となるように線形変換を施す.
-def train(data, with_standardize = false)
+def train(settings, data)
   fail "no data" if data.size == 0
-
-  # f(data)
 
   nx = nil
   ny = nil
-  if with_standardize then
+  if settings[:with_standardize] then
     # data を標準化する
     nx, ny, data = standardize_data(data)
   end
@@ -155,8 +138,8 @@ def train(data, with_standardize = false)
   # パラメータ t0, t1: それぞれ初期値を [-l,+l] からランダムにとる.
   l = 10
   params = { t0: rand * l * 2 - l, t1: rand * l * 2 - l, error2: Float::INFINITY, iterations: 0 }
-  rate = LearningRate
-  Iterations.times { |i|
+  rate = settings[:initial_learning_rate]
+  settings[:max_iterations].times { |i|
     a = params[:t0]
     b = params[:t1]
     if nx && ny then
@@ -173,6 +156,7 @@ def train(data, with_standardize = false)
     # 偏微分の大きさ
     ms = Math.sqrt(delta[:s0] ** 2 + delta[:s1] ** 2)
     fail "ms is not finite" if !ms.finite?
+    break if ms < settings[:epsilon] # イテレーション終了
 
     while (true) do
       dp = {
@@ -184,46 +168,61 @@ def train(data, with_standardize = false)
       e2d = d2[:error2]
       
       # Armijo条件
-      break if e2d <= e2 + Xi * rate * ms
+      break if e2d <= e2 + settings[:xi] * rate * ms
       rate *= 0.99
     end
 
-    break if ms < Epsilon # イテレーション終了
-
-    # $stderr.puts "  ms = #{ms}"
-    # $stderr.puts "  rate = #{rate}"
-    # $stderr.puts "  error_#{i} = #{delta[:error2]}"
     params[:t0] += rate * delta[:d0]
     params[:t1] += rate * delta[:d1]
     params[:error2] = delta[:error2]
     params[:iterations] += 1
   }
   if nx && ny then
+    # データが標準化されているなら, パラメータの標準化を解除して返す
     return unstandardize_params(params, nx, ny)
   else
     return params
   end
 end
 
-def trains(data, with_standardize = false)
+def synth_results(results, data)
+  n = results.size
+  synthed_params = results.reduce({ t0: 0, t1: 0 }){ |s, p| s[:t0] += p[:t0] / n; s[:t1] += p[:t1] / n; s }
+  synthed_precision = get_precision(data, synthed_params)
+  { **synthed_params, **synthed_precision }
+end
+
+# 学習セッティングに従い, dataを使って学習を行う
+def trains(settings, data)
   results = []
-  Trials.times { |i|
+  idx = (0...data.size).to_a.shuffle
+  n_parts = settings[:n_parts]
+  fail "less data size" if data.size / n_parts < 2
+  n_parts.times { |i|
     begin
-      params = train(data, with_standardize)
-      puts "#{i + 1}-th trial t0: #{params[:t0]} t1: #{params[:t1]} err2: #{params[:error2]} iters: #{params[:iterations]}"
-      results << params
+      train_data = (0...data.size).reject{ |j| idx[j] % n_parts == i }.map{ |j| data[j] }
+      validation_data = (0...data.size).select{ |j| idx[j] % n_parts == i }.map{ |j| data[j] }
+      params = train(settings, train_data)
+      nth = i + 1
+      puts sprintf("[trial #%d in %u iterations]\nt0: %f t1: %f",
+        nth, params[:iterations], params[:t0], params[:t1],
+      )
+      precision = get_precision(validation_data, params)
+      puts stringify_precision(precision)
+      results << { **params, **precision, nth: nth, train_data: train_data, validation_data: validation_data }
     rescue => e
+      # 学習中のエラーはスルーして次へ
+      $stderr.puts e.message
       next
     end
   }
   fail "no valid results" if results.size < 1
-  results.sort_by!{ |p| p[:error2] }
-  picked = results[0...Picks]
-  total = picked.reduce({ t0: 0, t1: 0 }){ |s, p| { t0: s[:t0] + p[:t0], t1: s[:t1] + p[:t1] } }
-  mean = { t0: total[:t0] / picked.size, t1: total[:t1] / picked.size }
-  puts "mean t0: #{mean[:t0]} t1: #{mean[:t1]}"
-  get_precision(data, mean)
-  return mean
+  picked = results.min_by{ |p| p[:error2] }
+  puts sprintf("picked: iteration #%d\nt0: %f t1: %f", picked[:nth], picked[:t0], picked[:t1])
+  puts stringify_precision(picked)
+  # picked = synth_results(results, data)
+  # puts sprintf("picked:\nt0: %f t1: %f\nerr2: %f\nR2: %f", picked[:t0], picked[:t1], picked[:error2], picked[:R2])
+  return picked
 end
 
 # 検算用: 解析解など
@@ -274,16 +273,111 @@ def write_params(params, path)
   File.open(path, "w") { |f|
     f.write(JSON.unparse(params))
   }
-rescue => e
-  p e
-  exit 1
+end
+
+def write_gnuplot(settings, result)
+  # datファイル
+  File.open(PathGnuplotData, "w") { |f|
+    result[:train_data].each{ |d|
+      f.puts sprintf("%f %f", d[:x], d[:y])
+    }
+    f.puts
+    f.puts
+    result[:validation_data].each{ |d|
+      f.puts sprintf("%f %f", d[:x], d[:y])
+    }
+  }
+  # gpファイル
+  File.open(PathGnuplotGp, "w") { |f|
+    f.puts <<-"EOF"
+    t0 = "#{result[:t0]}"
+    t1 = "#{result[:t1]}"
+    f(x) = t0 + t1 * x
+    plot "#{PathGnuplotData}" index 0 title "Training Data", f(x) title "Prediction", "#{PathGnuplotData}" index 1 title "Validation Data"
+    EOF
+  }
+end
+
+
+PathData = "data.csv"
+PathParameters = "params.json"
+LearningRate = 0.5
+Parts = 6
+Iterations = 100000
+Epsilon = 1e-10
+Xi = 0.8
+PathGnuplotGp = "gnuplot.gp"
+PathGnuplotData = "gnuplot.dat"
+
+# オプションを解析し, 学習セッティングを変更する
+def parse_opt
+  settings = {
+    # csvファイルのパス
+    path_data: PathData,
+    # パラメータの保存先
+    path_params: PathParameters,
+    # 標準化を行うかどうか
+    # 標準化: x, y それぞれについて, 平均 = 0, 分散 = 1 となるように線形変換を施す.
+    with_standardize: true,
+    # 学習率の初期値
+    initial_learning_rate: LearningRate,
+    # クロスバリデーションにおける分割数
+    n_parts: Parts,
+    # 最大イテレーション
+    max_iterations: Iterations,
+    # エラーイプシロン: 「誤差自乗和の勾配ベクトルの大きさ」がこの値を下回るとイテレーションを終える
+    epsilon: Epsilon,
+    # Arumijo条件におけるパラメータξ
+    xi: Xi,
+    # gnuplot用gpファイル, datファイルを出力するかどうか
+    write_gnuplot: false,
+  }
+
+  opt = OptionParser.new { |opt|
+    opt.on('-p number of partition', Integer) { |v|
+      raise OptionParser::InvalidArgument.new("required: >= 2") if v < 2
+      settings[:n_parts] = v
+    }
+    opt.on('-t max number of iterations', Integer) { |v|
+      raise OptionParser::InvalidArgument.new("required: >= 1") if v < 1
+      settings[:max_iterations] = v
+    }
+    opt.on('-i data_file_path', String) { |v|
+      settings[:path_data] = v
+    }
+    opt.on('-o json_file_path', String) { |v|
+      settings[:path_params] = v
+    }
+    opt.on('-e epsilon for iteration', Float) { |v|
+      raise OptionParser::InvalidArgument.new("required: > 0") if v <= 0
+      settings[:epsilon] = v
+    }
+    opt.on('-x xi for Armijo Condition', Float) { |v|
+      raise OptionParser::InvalidArgument.new("required: > 0") if v <= 0
+      settings[:xi] = v
+    }
+    opt.on('-g') { |v|
+      settings[:write_gnuplot] = true
+    }
+  }
+  opt.parse(ARGV)
+  return settings
 end
 
 def main
-  # ds = get_data_from_boston
-  ds = get_data_from_csv(PathData)
-  params = trains(ds, true)
-  write_params(params, PathParameters)
+  settings = parse_opt
+  # data = get_data_from_boston
+  data = get_data_from_csv(settings[:path_data])
+  result = trains(settings, data)
+  write_params(result, settings[:path_params])
+  if settings[:write_gnuplot]
+    write_gnuplot(settings, result)
+  end
+
+# 例外はすべて exit 1
+rescue => e
+  $stderr.puts e.message
+  exit 1
 end
 
 main()
