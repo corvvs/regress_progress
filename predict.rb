@@ -8,10 +8,6 @@ PathParameters = "params.json"
 def get_params_from(path)
   params_str = IO.read(path)
   return JSON.parse(params_str)
-
-rescue => e
-  p e
-  exit 1
 end
 
 def predict(params, km)
@@ -34,7 +30,7 @@ def main
   puts "price predicted: #{price}"
 
 rescue => e
-  $stderr.puts e.inspect
+  $stderr.puts e.message
   exit 1
 rescue => e
   exit 1

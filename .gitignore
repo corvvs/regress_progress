@@ -1,1 +1,7 @@
 params.json
+*.plot
+*.txt
+*.dat
+*.gp
+*.plt
+*.png
