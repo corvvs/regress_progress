@@ -11,7 +11,9 @@ def get_params_from(path)
   rescue => e
     # IOのエラーが起きた場合はデフォルト値を使う
     $stderr.puts e.message
-    return { "t0" => 0, "t1" => 1 }
+    defparam = { "t0" => 0, "t1" => 0 }
+    $stderr.puts "using default parameters: #{defparam}"
+    return defparam
   end
   return JSON.parse(params_str)
 end
@@ -24,7 +26,7 @@ def main
   params = get_params_from(PathParameters)
   fail "params.json has no data" if !params
   fail "params.json has unexpected data" if !(params["t0"].is_a? Numeric) || !(params["t1"].is_a? Numeric)
-  fail "params.json has unexpected format" if !params["t0"].finite? || !params["t1"].finite?
+  fail "params.json has unexpected format" if !Float(params["t0"]) || !Float(params["t1"])
 
   print "tell me \"km\" > "
   km, = $stdin.gets.scanf("%f")
@@ -38,7 +40,7 @@ def main
   puts "price predicted: #{price}"
 
 rescue => e
-  $stderr.puts e.message
+  $stderr.puts [e.class, e.message] * " "
   exit 1
 rescue => e
   exit 1

@@ -269,6 +269,7 @@ def write_gnuplot(settings, result)
       f.puts sprintf("%f %f", d[:x], d[:y])
     }
   }
+  $stdout.puts "plot data file: #{PathGnuplotData}"
   # gpファイル
   File.open(PathGnuplotGp, "w") { |f|
     f.puts <<-"EOF"
@@ -278,6 +279,7 @@ def write_gnuplot(settings, result)
     plot "#{PathGnuplotData}" index 0 title "Training Data", f(x) title "Prediction", "#{PathGnuplotData}" index 1 title "Validation Data"
     EOF
   }
+  $stdout.puts "script file: #{PathGnuplotGp}"
 end
 
 
@@ -316,11 +318,11 @@ def parse_opt
   }
 
   opt = OptionParser.new { |opt|
-    opt.on('-p number of partition', Integer) { |v|
+    opt.on('-p number_of_partition', Integer) { |v|
       raise OptionParser::InvalidArgument.new("required: >= 2") if v < 2
       settings[:n_parts] = v
     }
-    opt.on('-t max number of iterations', Integer) { |v|
+    opt.on('-t smax_number_of_iterations', Integer) { |v|
       raise OptionParser::InvalidArgument.new("required: >= 1") if v < 1
       settings[:max_iterations] = v
     }
@@ -338,7 +340,7 @@ def parse_opt
       raise OptionParser::InvalidArgument.new("required: > 0") if v <= 0
       settings[:xi] = v
     }
-    opt.on('-g') { |v|
+    opt.on('-g', 'generate script file for gnuplot') { |v|
       settings[:write_gnuplot] = true
     }
   }
